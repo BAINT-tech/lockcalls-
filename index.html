@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BlockCall - Simple Video</title>
+  <title>BlockCall - Video Fixed</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
@@ -25,7 +25,6 @@
         <button onclick="copyId()" class="px-4 py-2 bg-blue-500 rounded hover:bg-blue-600">
           📋 Copy My ID
         </button>
-        <p class="text-xs text-gray-500 mt-2">Share this ID with the person you want to call</p>
       </div>
       
       <!-- Call Someone -->
@@ -40,7 +39,6 @@
         <button onclick="startCall()" class="w-full py-4 bg-green-500 hover:bg-green-600 rounded-lg font-bold text-lg">
           📹 Start Video Call
         </button>
-        <p class="text-xs text-gray-500 mt-2">⚠️ Important: Only ONE person should click "Start Call"</p>
       </div>
     </div>
 
@@ -70,7 +68,7 @@
           <div id="waitingMsg" class="absolute inset-0 flex items-center justify-center bg-gray-800">
             <div class="text-center">
               <div class="text-4xl mb-2">⏳</div>
-              <p class="text-gray-400">Waiting for them to join...</p>
+              <p class="text-gray-400">Waiting for video...</p>
             </div>
           </div>
         </div>
@@ -91,8 +89,7 @@
       
       <!-- Debug Info -->
       <div class="mt-4 bg-gray-800 rounded p-4 text-xs">
-        <p class="text-gray-400">Connection Status:</p>
-        <p id="debugInfo" class="text-gray-500 font-mono">Initializing...</p>
+        <div id="debugInfo" class="text-gray-400 font-mono space-y-1"></div>
       </div>
     </div>
 
@@ -101,136 +98,181 @@
   <script>
     let peer;
     let myStream;
-    let call;
+    let activeCall;
     let myId;
     let micOn = true;
     let camOn = true;
 
+    function addDebug(msg) {
+      const debug = document.getElementById('debugInfo');
+      if (debug) {
+        const time = new Date().toLocaleTimeString();
+        const line = document.createElement('div');
+        line.textContent = `[${time}] ${msg}`;
+        debug.appendChild(line);
+        // Keep only last 10 lines
+        while (debug.children.length > 10) {
+          debug.removeChild(debug.firstChild);
+        }
+      }
+      console.log(msg);
+    }
+
     // Initialize
     window.onload = function() {
-      // Create peer with custom config for better connectivity
+      addDebug('🚀 Initializing...');
+      
       peer = new Peer({
         config: {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' }
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' }
           ]
-        }
+        },
+        debug: 2
       });
       
       peer.on('open', (id) => {
         myId = id;
         document.getElementById('myId').textContent = id;
-        updateDebug('✅ Ready! Your ID: ' + id);
-        console.log('My ID:', id);
+        addDebug('✅ Connected! ID: ' + id);
       });
 
       peer.on('call', (incomingCall) => {
-        console.log('📞 Incoming call from:', incomingCall.peer);
-        updateDebug('📞 Incoming call! Answering...');
+        addDebug('📞 Incoming call from: ' + incomingCall.peer);
         answerCall(incomingCall);
       });
 
       peer.on('error', (error) => {
-        console.error('Peer error:', error);
-        updateDebug('❌ Error: ' + error.type);
-        if (error.type === 'peer-unavailable') {
-          alert('❌ Cannot reach that person. Make sure they:\n1. Have the page open\n2. Copied the correct ID\n3. Are NOT trying to call you at the same time');
-        }
+        addDebug('❌ Peer error: ' + error.type);
+        console.error('Full error:', error);
+      });
+
+      peer.on('disconnected', () => {
+        addDebug('⚠️ Disconnected from server');
+      });
+
+      peer.on('close', () => {
+        addDebug('❌ Peer connection closed');
       });
     };
 
-    function updateDebug(msg) {
-      const debug = document.getElementById('debugInfo');
-      if (debug) {
-        const time = new Date().toLocaleTimeString();
-        debug.textContent = `[${time}] ${msg}`;
-      }
-      console.log(msg);
-    }
-
     function copyId() {
       navigator.clipboard.writeText(myId);
-      alert('✅ ID copied!\n\nSend this to the person you want to call.\n\nIMPORTANT: Only ONE person should click "Start Call" - the other person just waits!');
+      alert('✅ ID copied!');
     }
 
     async function startCall() {
       const theirId = document.getElementById('theirId').value.trim();
       
       if (!theirId) {
-        alert('❌ Please paste their ID first!');
+        alert('❌ Please paste their ID!');
         return;
       }
 
       if (theirId === myId) {
-        alert('❌ You cannot call yourself!');
+        alert('❌ Cannot call yourself!');
         return;
       }
 
-      updateDebug('🎥 Getting camera access...');
+      addDebug('🎥 Requesting camera/mic...');
 
       try {
-        // Get my video/audio
+        // Get camera FIRST with specific constraints
         myStream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 640, height: 480 }, 
-          audio: true 
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: 'user'
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true
+          }
         });
         
+        addDebug('✅ Camera granted! Tracks: ' + myStream.getTracks().length);
         document.getElementById('myVideo').srcObject = myStream;
-        updateDebug('✅ Camera ready! Calling ' + theirId + '...');
 
         // Show call screen
         document.getElementById('home').classList.add('hidden');
         document.getElementById('callScreen').classList.remove('hidden');
         document.getElementById('status').textContent = '📞 Calling...';
 
-        // Make the call
-        call = peer.call(theirId, myStream);
+        // Small delay to ensure video is ready
+        await new Promise(resolve => setTimeout(resolve, 500));
 
-        if (!call) {
-          throw new Error('Failed to initiate call');
+        addDebug('📞 Initiating call to: ' + theirId);
+
+        // Make the call with our stream
+        activeCall = peer.call(theirId, myStream);
+
+        if (!activeCall) {
+          throw new Error('Call failed to initiate');
         }
 
-        updateDebug('📞 Call initiated, waiting for answer...');
+        addDebug('📞 Call object created, waiting for answer...');
 
-        // When they answer
-        call.on('stream', (remoteStream) => {
-          updateDebug('✅ Connected! Receiving video...');
-          document.getElementById('theirVideo').srcObject = remoteStream;
+        // Listen for their stream
+        activeCall.on('stream', (remoteStream) => {
+          addDebug('✅ REMOTE STREAM RECEIVED!');
+          addDebug('📊 Remote tracks: ' + remoteStream.getTracks().length);
+          
+          const videoEl = document.getElementById('theirVideo');
+          videoEl.srcObject = remoteStream;
+          
+          // Ensure video plays
+          videoEl.play().catch(e => addDebug('⚠️ Video play error: ' + e.message));
+          
           document.getElementById('waitingMsg').style.display = 'none';
           document.getElementById('status').textContent = '✅ Connected!';
           document.getElementById('status').className = 'text-green-400 mb-2';
           document.getElementById('remoteStatus').innerHTML = '<span class="text-green-400">● </span>Them';
         });
 
-        call.on('close', () => {
-          updateDebug('📞 Call ended by other person');
+        activeCall.on('close', () => {
+          addDebug('📞 Call closed by remote');
           endCall();
         });
 
-        call.on('error', (error) => {
-          updateDebug('❌ Call error: ' + error);
-          alert('Call failed: ' + error.message);
+        activeCall.on('error', (error) => {
+          addDebug('❌ Call error: ' + error);
+          alert('Call error: ' + error.message);
+          endCall();
+        });
+
+        // Log connection state changes
+        activeCall.peerConnection.addEventListener('iceconnectionstatechange', () => {
+          addDebug('🔌 ICE state: ' + activeCall.peerConnection.iceConnectionState);
         });
 
       } catch (error) {
-        updateDebug('❌ Error: ' + error.message);
-        alert('❌ Error accessing camera/microphone:\n\n' + error.message + '\n\nPlease allow camera and microphone permissions!');
+        addDebug('❌ Media error: ' + error.message);
+        alert('❌ Camera error:\n\n' + error.message);
         document.getElementById('callScreen').classList.add('hidden');
         document.getElementById('home').classList.remove('hidden');
       }
     }
 
     async function answerCall(incomingCall) {
-      updateDebug('📞 Answering incoming call...');
+      addDebug('📞 Answering call...');
 
       try {
-        // Get my video/audio
+        // Get camera with specific constraints
         myStream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 640, height: 480 }, 
-          audio: true 
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: 'user'
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true
+          }
         });
         
+        addDebug('✅ Camera granted! Tracks: ' + myStream.getTracks().length);
         document.getElementById('myVideo').srcObject = myStream;
 
         // Show call screen
@@ -238,32 +280,44 @@
         document.getElementById('callScreen').classList.remove('hidden');
         document.getElementById('status').textContent = '📞 Answering...';
 
-        updateDebug('✅ Camera ready! Answering call...');
+        // Small delay
+        await new Promise(resolve => setTimeout(resolve, 500));
 
-        // Answer the call with my stream
-        call = incomingCall;
-        call.answer(myStream);
+        activeCall = incomingCall;
+        
+        addDebug('📞 Answering with stream...');
+        activeCall.answer(myStream);
 
-        updateDebug('📞 Answered! Waiting for video...');
-
-        // When we receive their stream
-        call.on('stream', (remoteStream) => {
-          updateDebug('✅ Connected! Receiving video...');
-          document.getElementById('theirVideo').srcObject = remoteStream;
+        // Listen for their stream
+        activeCall.on('stream', (remoteStream) => {
+          addDebug('✅ REMOTE STREAM RECEIVED!');
+          addDebug('📊 Remote tracks: ' + remoteStream.getTracks().length);
+          
+          const videoEl = document.getElementById('theirVideo');
+          videoEl.srcObject = remoteStream;
+          
+          // Ensure video plays
+          videoEl.play().catch(e => addDebug('⚠️ Video play error: ' + e.message));
+          
           document.getElementById('waitingMsg').style.display = 'none';
           document.getElementById('status').textContent = '✅ Connected!';
           document.getElementById('status').className = 'text-green-400 mb-2';
           document.getElementById('remoteStatus').innerHTML = '<span class="text-green-400">● </span>Them';
         });
 
-        call.on('close', () => {
-          updateDebug('📞 Call ended by other person');
+        activeCall.on('close', () => {
+          addDebug('📞 Call closed by remote');
           endCall();
         });
 
+        // Log connection state
+        activeCall.peerConnection.addEventListener('iceconnectionstatechange', () => {
+          addDebug('🔌 ICE state: ' + activeCall.peerConnection.iceConnectionState);
+        });
+
       } catch (error) {
-        updateDebug('❌ Error: ' + error.message);
-        alert('❌ Error accessing camera/microphone:\n\n' + error.message + '\n\nPlease allow camera and microphone permissions!');
+        addDebug('❌ Media error: ' + error.message);
+        alert('❌ Camera error:\n\n' + error.message);
         document.getElementById('callScreen').classList.add('hidden');
         document.getElementById('home').classList.remove('hidden');
       }
@@ -272,35 +326,38 @@
     function toggleMic() {
       if (!myStream) return;
       micOn = !micOn;
-      myStream.getAudioTracks()[0].enabled = micOn;
+      myStream.getAudioTracks().forEach(track => track.enabled = micOn);
       document.getElementById('micBtn').textContent = micOn ? '🎤' : '🔇';
       document.getElementById('micBtn').className = micOn 
         ? 'p-4 bg-gray-700 rounded-full hover:bg-gray-600'
         : 'p-4 bg-red-500 rounded-full hover:bg-red-600';
-      updateDebug(micOn ? '🎤 Mic on' : '🔇 Mic off');
+      addDebug(micOn ? '🎤 Mic on' : '🔇 Mic off');
     }
 
     function toggleCam() {
       if (!myStream) return;
       camOn = !camOn;
-      myStream.getVideoTracks()[0].enabled = camOn;
+      myStream.getVideoTracks().forEach(track => track.enabled = camOn);
       document.getElementById('camBtn').textContent = camOn ? '📹' : '📷';
       document.getElementById('camBtn').className = camOn 
         ? 'p-4 bg-gray-700 rounded-full hover:bg-gray-600'
         : 'p-4 bg-red-500 rounded-full hover:bg-red-600';
-      updateDebug(camOn ? '📹 Camera on' : '📷 Camera off');
+      addDebug(camOn ? '📹 Camera on' : '📷 Camera off');
     }
 
     function endCall() {
-      updateDebug('📞 Ending call...');
+      addDebug('📞 Ending call...');
       
-      if (call) {
-        call.close();
-        call = null;
+      if (activeCall) {
+        activeCall.close();
+        activeCall = null;
       }
       
       if (myStream) {
-        myStream.getTracks().forEach(track => track.stop());
+        myStream.getTracks().forEach(track => {
+          track.stop();
+          addDebug('🛑 Stopped track: ' + track.kind);
+        });
         myStream = null;
       }
       
@@ -314,17 +371,9 @@
       micOn = true;
       camOn = true;
       
-      updateDebug('✅ Call ended. Ready for new call.');
+      addDebug('✅ Call ended');
     }
-
-    // Prevent accidental page close during call
-    window.addEventListener('beforeunload', (e) => {
-      if (call) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    });
   </script>
 
 </body>
-</html>
+  </html>
