@@ -22,9 +22,10 @@
         <div class="bg-black rounded p-4 mb-4">
           <code id="myId" class="text-green-400 text-lg">Loading...</code>
         </div>
-        <button onclick="copyId()" class="px-4 py-2 bg-blue-500 rounded">
-          Copy My ID
+        <button onclick="copyId()" class="px-4 py-2 bg-blue-500 rounded hover:bg-blue-600">
+          📋 Copy My ID
         </button>
+        <p class="text-xs text-gray-500 mt-2">Share this ID with the person you want to call</p>
       </div>
       
       <!-- Call Someone -->
@@ -39,6 +40,7 @@
         <button onclick="startCall()" class="w-full py-4 bg-green-500 hover:bg-green-600 rounded-lg font-bold text-lg">
           📹 Start Video Call
         </button>
+        <p class="text-xs text-gray-500 mt-2">⚠️ Important: Only ONE person should click "Start Call"</p>
       </div>
     </div>
 
@@ -46,32 +48,51 @@
     <div id="callScreen" class="hidden">
       <div class="mb-4 text-center">
         <h2 class="text-2xl font-bold">In Call</h2>
-        <p id="status" class="text-gray-400">Connecting...</p>
+        <p id="status" class="text-yellow-400 mb-2">⏳ Connecting...</p>
       </div>
       
       <!-- Videos -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <!-- My Video -->
         <div class="bg-black rounded-lg overflow-hidden aspect-video relative">
           <video id="myVideo" autoplay muted playsinline class="w-full h-full object-cover"></video>
-          <div class="absolute bottom-2 left-2 bg-black/70 px-3 py-1 rounded">You</div>
+          <div class="absolute bottom-2 left-2 bg-black/70 px-3 py-1 rounded">
+            <span class="text-green-400">● </span>You
+          </div>
         </div>
+        
+        <!-- Their Video -->
         <div class="bg-black rounded-lg overflow-hidden aspect-video relative">
           <video id="theirVideo" autoplay playsinline class="w-full h-full object-cover"></video>
-          <div class="absolute bottom-2 left-2 bg-black/70 px-3 py-1 rounded">Them</div>
+          <div class="absolute bottom-2 left-2 bg-black/70 px-3 py-1 rounded">
+            <span id="remoteStatus" class="text-yellow-400">● </span>Them
+          </div>
+          <div id="waitingMsg" class="absolute inset-0 flex items-center justify-center bg-gray-800">
+            <div class="text-center">
+              <div class="text-4xl mb-2">⏳</div>
+              <p class="text-gray-400">Waiting for them to join...</p>
+            </div>
+          </div>
         </div>
       </div>
       
       <!-- Controls -->
       <div class="flex justify-center gap-4">
-        <button onclick="toggleMic()" id="micBtn" class="p-4 bg-gray-700 rounded-full">
+        <button onclick="toggleMic()" id="micBtn" class="p-4 bg-gray-700 rounded-full hover:bg-gray-600">
           🎤
         </button>
-        <button onclick="toggleCam()" id="camBtn" class="p-4 bg-gray-700 rounded-full">
+        <button onclick="toggleCam()" id="camBtn" class="p-4 bg-gray-700 rounded-full hover:bg-gray-600">
           📹
         </button>
-        <button onclick="endCall()" class="p-4 bg-red-500 rounded-full">
-          📞
+        <button onclick="endCall()" class="p-4 bg-red-500 rounded-full hover:bg-red-600">
+          📞 End
         </button>
+      </div>
+      
+      <!-- Debug Info -->
+      <div class="mt-4 bg-gray-800 rounded p-4 text-xs">
+        <p class="text-gray-400">Connection Status:</p>
+        <p id="debugInfo" class="text-gray-500 font-mono">Initializing...</p>
       </div>
     </div>
 
@@ -87,99 +108,222 @@
 
     // Initialize
     window.onload = function() {
-      peer = new Peer();
+      // Create peer with custom config for better connectivity
+      peer = new Peer({
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+          ]
+        }
+      });
       
       peer.on('open', (id) => {
         myId = id;
         document.getElementById('myId').textContent = id;
+        updateDebug('✅ Ready! Your ID: ' + id);
         console.log('My ID:', id);
       });
 
       peer.on('call', (incomingCall) => {
-        console.log('Incoming call!');
+        console.log('📞 Incoming call from:', incomingCall.peer);
+        updateDebug('📞 Incoming call! Answering...');
         answerCall(incomingCall);
+      });
+
+      peer.on('error', (error) => {
+        console.error('Peer error:', error);
+        updateDebug('❌ Error: ' + error.type);
+        if (error.type === 'peer-unavailable') {
+          alert('❌ Cannot reach that person. Make sure they:\n1. Have the page open\n2. Copied the correct ID\n3. Are NOT trying to call you at the same time');
+        }
       });
     };
 
+    function updateDebug(msg) {
+      const debug = document.getElementById('debugInfo');
+      if (debug) {
+        const time = new Date().toLocaleTimeString();
+        debug.textContent = `[${time}] ${msg}`;
+      }
+      console.log(msg);
+    }
+
     function copyId() {
       navigator.clipboard.writeText(myId);
-      alert('✅ ID copied! Share this with the person you want to call.');
+      alert('✅ ID copied!\n\nSend this to the person you want to call.\n\nIMPORTANT: Only ONE person should click "Start Call" - the other person just waits!');
     }
 
     async function startCall() {
       const theirId = document.getElementById('theirId').value.trim();
       
       if (!theirId) {
-        alert('❌ Please enter their ID!');
+        alert('❌ Please paste their ID first!');
         return;
       }
 
+      if (theirId === myId) {
+        alert('❌ You cannot call yourself!');
+        return;
+      }
+
+      updateDebug('🎥 Getting camera access...');
+
       try {
-        // Get my video
-        myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        document.getElementById('myVideo').srcObject = myStream;
-
-        // Call them
-        call = peer.call(theirId, myStream);
-
-        call.on('stream', (theirStream) => {
-          document.getElementById('theirVideo').srcObject = theirStream;
-          document.getElementById('status').textContent = '✅ Connected!';
+        // Get my video/audio
+        myStream = await navigator.mediaDevices.getUserMedia({ 
+          video: { width: 640, height: 480 }, 
+          audio: true 
         });
+        
+        document.getElementById('myVideo').srcObject = myStream;
+        updateDebug('✅ Camera ready! Calling ' + theirId + '...');
 
         // Show call screen
         document.getElementById('home').classList.add('hidden');
         document.getElementById('callScreen').classList.remove('hidden');
+        document.getElementById('status').textContent = '📞 Calling...';
+
+        // Make the call
+        call = peer.call(theirId, myStream);
+
+        if (!call) {
+          throw new Error('Failed to initiate call');
+        }
+
+        updateDebug('📞 Call initiated, waiting for answer...');
+
+        // When they answer
+        call.on('stream', (remoteStream) => {
+          updateDebug('✅ Connected! Receiving video...');
+          document.getElementById('theirVideo').srcObject = remoteStream;
+          document.getElementById('waitingMsg').style.display = 'none';
+          document.getElementById('status').textContent = '✅ Connected!';
+          document.getElementById('status').className = 'text-green-400 mb-2';
+          document.getElementById('remoteStatus').innerHTML = '<span class="text-green-400">● </span>Them';
+        });
+
+        call.on('close', () => {
+          updateDebug('📞 Call ended by other person');
+          endCall();
+        });
+
+        call.on('error', (error) => {
+          updateDebug('❌ Call error: ' + error);
+          alert('Call failed: ' + error.message);
+        });
 
       } catch (error) {
-        alert('❌ Error: ' + error.message);
+        updateDebug('❌ Error: ' + error.message);
+        alert('❌ Error accessing camera/microphone:\n\n' + error.message + '\n\nPlease allow camera and microphone permissions!');
+        document.getElementById('callScreen').classList.add('hidden');
+        document.getElementById('home').classList.remove('hidden');
       }
     }
 
     async function answerCall(incomingCall) {
+      updateDebug('📞 Answering incoming call...');
+
       try {
-        // Get my video
-        myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        document.getElementById('myVideo').srcObject = myStream;
-
-        // Answer the call
-        call = incomingCall;
-        call.answer(myStream);
-
-        call.on('stream', (theirStream) => {
-          document.getElementById('theirVideo').srcObject = theirStream;
-          document.getElementById('status').textContent = '✅ Connected!';
+        // Get my video/audio
+        myStream = await navigator.mediaDevices.getUserMedia({ 
+          video: { width: 640, height: 480 }, 
+          audio: true 
         });
+        
+        document.getElementById('myVideo').srcObject = myStream;
 
         // Show call screen
         document.getElementById('home').classList.add('hidden');
         document.getElementById('callScreen').classList.remove('hidden');
+        document.getElementById('status').textContent = '📞 Answering...';
+
+        updateDebug('✅ Camera ready! Answering call...');
+
+        // Answer the call with my stream
+        call = incomingCall;
+        call.answer(myStream);
+
+        updateDebug('📞 Answered! Waiting for video...');
+
+        // When we receive their stream
+        call.on('stream', (remoteStream) => {
+          updateDebug('✅ Connected! Receiving video...');
+          document.getElementById('theirVideo').srcObject = remoteStream;
+          document.getElementById('waitingMsg').style.display = 'none';
+          document.getElementById('status').textContent = '✅ Connected!';
+          document.getElementById('status').className = 'text-green-400 mb-2';
+          document.getElementById('remoteStatus').innerHTML = '<span class="text-green-400">● </span>Them';
+        });
+
+        call.on('close', () => {
+          updateDebug('📞 Call ended by other person');
+          endCall();
+        });
 
       } catch (error) {
-        alert('❌ Error: ' + error.message);
+        updateDebug('❌ Error: ' + error.message);
+        alert('❌ Error accessing camera/microphone:\n\n' + error.message + '\n\nPlease allow camera and microphone permissions!');
+        document.getElementById('callScreen').classList.add('hidden');
+        document.getElementById('home').classList.remove('hidden');
       }
     }
 
     function toggleMic() {
+      if (!myStream) return;
       micOn = !micOn;
       myStream.getAudioTracks()[0].enabled = micOn;
       document.getElementById('micBtn').textContent = micOn ? '🎤' : '🔇';
+      document.getElementById('micBtn').className = micOn 
+        ? 'p-4 bg-gray-700 rounded-full hover:bg-gray-600'
+        : 'p-4 bg-red-500 rounded-full hover:bg-red-600';
+      updateDebug(micOn ? '🎤 Mic on' : '🔇 Mic off');
     }
 
     function toggleCam() {
+      if (!myStream) return;
       camOn = !camOn;
       myStream.getVideoTracks()[0].enabled = camOn;
       document.getElementById('camBtn').textContent = camOn ? '📹' : '📷';
+      document.getElementById('camBtn').className = camOn 
+        ? 'p-4 bg-gray-700 rounded-full hover:bg-gray-600'
+        : 'p-4 bg-red-500 rounded-full hover:bg-red-600';
+      updateDebug(camOn ? '📹 Camera on' : '📷 Camera off');
     }
 
     function endCall() {
-      if (call) call.close();
-      if (myStream) myStream.getTracks().forEach(track => track.stop());
+      updateDebug('📞 Ending call...');
       
+      if (call) {
+        call.close();
+        call = null;
+      }
+      
+      if (myStream) {
+        myStream.getTracks().forEach(track => track.stop());
+        myStream = null;
+      }
+      
+      document.getElementById('myVideo').srcObject = null;
+      document.getElementById('theirVideo').srcObject = null;
       document.getElementById('callScreen').classList.add('hidden');
       document.getElementById('home').classList.remove('hidden');
       document.getElementById('theirId').value = '';
+      document.getElementById('waitingMsg').style.display = 'flex';
+      
+      micOn = true;
+      camOn = true;
+      
+      updateDebug('✅ Call ended. Ready for new call.');
     }
+
+    // Prevent accidental page close during call
+    window.addEventListener('beforeunload', (e) => {
+      if (call) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
   </script>
 
 </body>
