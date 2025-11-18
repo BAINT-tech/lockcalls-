@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlockCall - Simple Video</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-4">
+  
+  <div class="max-w-4xl mx-auto">
+    
+    <!-- Home Screen -->
+    <div id="home" class="text-center">
+      <h1 class="text-4xl font-bold mb-4">BlockCall</h1>
+      <p class="text-gray-400 mb-8">Simple Video Calls</p>
+      
+      <!-- Your ID -->
+      <div class="bg-gray-800 rounded-lg p-6 mb-8">
+        <h2 class="text-xl font-bold mb-4">Your Call ID:</h2>
+        <div class="bg-black rounded p-4 mb-4">
+          <code id="myId" class="text-green-400 text-lg">Loading...</code>
+        </div>
+        <button onclick="copyId()" class="px-4 py-2 bg-blue-500 rounded">
+          Copy My ID
+        </button>
+      </div>
+      
+      <!-- Call Someone -->
+      <div class="bg-gray-800 rounded-lg p-6">
+        <h2 class="text-xl font-bold mb-4">Call Someone:</h2>
+        <input 
+          type="text" 
+          id="theirId" 
+          placeholder="Paste their ID here"
+          class="w-full p-3 bg-gray-700 rounded mb-4 text-white"
+        />
+        <button onclick="startCall()" class="w-full py-4 bg-green-500 hover:bg-green-600 rounded-lg font-bold text-lg">
+          📹 Start Video Call
+        </button>
+      </div>
+    </div>
+
+    <!-- Call Screen -->
+    <div id="callScreen" class="hidden">
+      <div class="mb-4 text-center">
+        <h2 class="text-2xl font-bold">In Call</h2>
+        <p id="status" class="text-gray-400">Connecting...</p>
+      </div>
+      
+      <!-- Videos -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div class="bg-black rounded-lg overflow-hidden aspect-video relative">
+          <video id="myVideo" autoplay muted playsinline class="w-full h-full object-cover"></video>
+          <div class="absolute bottom-2 left-2 bg-black/70 px-3 py-1 rounded">You</div>
+        </div>
+        <div class="bg-black rounded-lg overflow-hidden aspect-video relative">
+          <video id="theirVideo" autoplay playsinline class="w-full h-full object-cover"></video>
+          <div class="absolute bottom-2 left-2 bg-black/70 px-3 py-1 rounded">Them</div>
+        </div>
+      </div>
+      
+      <!-- Controls -->
+      <div class="flex justify-center gap-4">
+        <button onclick="toggleMic()" id="micBtn" class="p-4 bg-gray-700 rounded-full">
+          🎤
+        </button>
+        <button onclick="toggleCam()" id="camBtn" class="p-4 bg-gray-700 rounded-full">
+          📹
+        </button>
+        <button onclick="endCall()" class="p-4 bg-red-500 rounded-full">
+          📞
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let peer;
+    let myStream;
+    let call;
+    let myId;
+    let micOn = true;
+    let camOn = true;
+
+    // Initialize
+    window.onload = function() {
+      peer = new Peer();
+      
+      peer.on('open', (id) => {
+        myId = id;
+        document.getElementById('myId').textContent = id;
+        console.log('My ID:', id);
+      });
+
+      peer.on('call', (incomingCall) => {
+        console.log('Incoming call!');
+        answerCall(incomingCall);
+      });
+    };
+
+    function copyId() {
+      navigator.clipboard.writeText(myId);
+      alert('✅ ID copied! Share this with the person you want to call.');
+    }
+
+    async function startCall() {
+      const theirId = document.getElementById('theirId').value.trim();
+      
+      if (!theirId) {
+        alert('❌ Please enter their ID!');
+        return;
+      }
+
+      try {
+        // Get my video
+        myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        document.getElementById('myVideo').srcObject = myStream;
+
+        // Call them
+        call = peer.call(theirId, myStream);
+
+        call.on('stream', (theirStream) => {
+          document.getElementById('theirVideo').srcObject = theirStream;
+          document.getElementById('status').textContent = '✅ Connected!';
+        });
+
+        // Show call screen
+        document.getElementById('home').classList.add('hidden');
+        document.getElementById('callScreen').classList.remove('hidden');
+
+      } catch (error) {
+        alert('❌ Error: ' + error.message);
+      }
+    }
+
+    async function answerCall(incomingCall) {
+      try {
+        // Get my video
+        myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        document.getElementById('myVideo').srcObject = myStream;
+
+        // Answer the call
+        call = incomingCall;
+        call.answer(myStream);
+
+        call.on('stream', (theirStream) => {
+          document.getElementById('theirVideo').srcObject = theirStream;
+          document.getElementById('status').textContent = '✅ Connected!';
+        });
+
+        // Show call screen
+        document.getElementById('home').classList.add('hidden');
+        document.getElementById('callScreen').classList.remove('hidden');
+
+      } catch (error) {
+        alert('❌ Error: ' + error.message);
+      }
+    }
+
+    function toggleMic() {
+      micOn = !micOn;
+      myStream.getAudioTracks()[0].enabled = micOn;
+      document.getElementById('micBtn').textContent = micOn ? '🎤' : '🔇';
+    }
+
+    function toggleCam() {
+      camOn = !camOn;
+      myStream.getVideoTracks()[0].enabled = camOn;
+      document.getElementById('camBtn').textContent = camOn ? '📹' : '📷';
+    }
+
+    function endCall() {
+      if (call) call.close();
+      if (myStream) myStream.getTracks().forEach(track => track.stop());
+      
+      document.getElementById('callScreen').classList.add('hidden');
+      document.getElementById('home').classList.remove('hidden');
+      document.getElementById('theirId').value = '';
+    }
+  </script>
+
+</body>
+</html>
